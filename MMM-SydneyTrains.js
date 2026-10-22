@@ -170,8 +170,9 @@ Module.register("MMM-SydneyTrains", {
         item.className = "train-item";
 
         var destination = train.transportation?.destination?.name || 'Unknown';
-        var lineNumber = train.transportation?.number || '';
-        var platform = train.location?.properties?.platform || 'TBA';
+        // Short line name ("T4") and platform name ("Platform 1") rather than the full line name and platform code ("KRW1")
+        var lineNumber = train.transportation?.disassembledName || train.transportation?.number || '';
+        var platform = train.location?.properties?.platformName || 'Platform ' + (train.location?.properties?.platform || 'TBA');
 
         // Calculate time and delay
         var departureTimePlanned = train.departureTimePlanned;
@@ -231,7 +232,7 @@ Module.register("MMM-SydneyTrains", {
 
         var platformSpan = document.createElement("span");
         platformSpan.className = "platform";
-        platformSpan.innerHTML = "Plat " + platform;
+        platformSpan.innerHTML = platform;
         infoDiv.appendChild(platformSpan);
 
         item.appendChild(infoDiv);
