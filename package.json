@@ -1,0 +1,28 @@
+{
+  "name": "mmm-sydneytrains",
+  "version": "1.0.0",
+  "description": "MagicMirror² module showing real-time Sydney Trains departures from the Transport for NSW API",
+  "main": "MMM-SydneyTrains.js",
+  "author": "Lachlan Young",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lachie-92/MMM-SydneyTrains.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lachie-92/MMM-SydneyTrains/issues"
+  },
+  "homepage": "https://github.com/lachie-92/MMM-SydneyTrains#readme",
+  "keywords": [
+    "MagicMirror",
+    "transport",
+    "trains",
+    "Sydney",
+    "NSW",
+    "TfNSW",
+    "Australia"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
