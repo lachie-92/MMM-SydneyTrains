@@ -1,10 +1,10 @@
 [
     {
-        "id": "central-t1-west",
+        "id": "central-to-penrith",
         "name": "Central to Penrith",
         "stopId": "10101100",
-        "lineFilter": "T1",
-        "destinationFilter": "Penrith"
+        "toStopId": "10101252",
+        "walkMinutes": 10
     },
     {
         "id": "central-all",

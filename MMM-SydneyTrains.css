@@ -1,17 +1,23 @@
 .sydney-trains {
+    width: 460px;
     font-family: "Roboto Condensed", sans-serif;
     color: #fff;
+    text-align: left;
 }
 
 .route-container {
-    margin-bottom: 25px;
+    margin-bottom: 18px;
+}
+
+.route-container:last-child {
+    margin-bottom: 0;
 }
 
 .route-header {
-    font-size: 20px;
+    font-size: 17px;
     font-weight: bold;
-    margin-bottom: 10px;
-    padding-bottom: 5px;
+    margin-bottom: 4px;
+    padding-bottom: 4px;
     border-bottom: 2px solid #f37021;
     color: #f37021;
 }
@@ -20,15 +26,37 @@
     margin-right: 8px;
 }
 
-.train-list {
-    margin-top: 10px;
+.route-alert {
+    margin-bottom: 6px;
+    overflow: hidden;
+    color: #ffb74d;
+    font-size: 14px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
 }
 
+.route-alert i {
+    margin-right: 6px;
+}
+
+/* Pickup and drop-off stations, lined up over the times */
+.places {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin-left: 84px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+/* One row per train: countdown tile, then times and status */
 .train-item {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 0;
+    align-items: stretch;
+    gap: 12px;
+    padding: 3px 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
@@ -36,59 +64,216 @@
     border-bottom: none;
 }
 
-.train-item.delayed {
-    background-color: rgba(220, 53, 69, 0.1);
-    padding-left: 8px;
-    border-left: 3px solid #dc3545;
+.countdown {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 72px;
+    border-radius: 6px;
+    background-color: var(--line-colour);
+    color: var(--line-text);
+    line-height: 1;
 }
 
-.train-time {
-    font-size: 24px;
+.countdown-value {
+    font-size: 26px;
     font-weight: bold;
-    min-width: 80px;
-    text-align: left;
 }
 
-.train-info {
+.countdown-unit {
+    margin-top: 1px;
+    font-size: 12px;
+}
+
+.train-body {
     flex: 1;
-    margin-left: 15px;
+    min-width: 0;
+}
+
+.train-row {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 10px;
 }
 
-.destination {
+.places .from,
+.places .to,
+.terminus {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.times {
+    font-size: 22px;
+    font-weight: bold;
+    line-height: 1.2;
+}
+
+.terminus {
     font-size: 16px;
     font-weight: normal;
 }
 
-.line-badge {
-    background-color: #f37021;
-    color: white;
-    padding: 2px 8px;
-    border-radius: 3px;
-    font-size: 12px;
-    font-weight: bold;
+/* Dotted line between the times, with the trip length in the middle */
+.journey {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
-.platform {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.6);
+.journey::before,
+.journey::after {
+    content: "";
+    flex: 1;
+    border-top: 2px dotted rgba(255, 255, 255, 0.25);
 }
 
-.delay-badge {
+.journey-length {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    font-weight: normal;
+}
+
+.status-row {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.75);
+}
+
+.status {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.status-light {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 6px;
+    border-radius: 2px;
+    background-color: #999;
+}
+
+.status-light.on-time {
+    background-color: #3fb950;
+}
+
+.status-light.early {
+    background-color: #4fc3f7;
+}
+
+.status-light.slightly-late {
+    background-color: #ffb300;
+}
+
+.status-light.late,
+.status-light.cancelled {
     background-color: #dc3545;
-    color: white;
-    padding: 4px 8px;
+}
+
+.status-light.scheduled {
+    background-color: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.platform::before,
+.leave::before {
+    content: "·";
+    margin: 0 6px;
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: normal;
+}
+
+.leave {
+    color: #fff;
+    font-weight: bold;
+}
+
+.extras {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.cars {
+    color: #ffb300;
+    font-size: 12px;
+}
+
+.occupancy i {
+    margin-left: 1px;
+    color: rgba(255, 255, 255, 0.25);
+    font-size: 12px;
+}
+
+.occupancy i.filled {
+    color: #fff;
+}
+
+.occupancy.level-2 i.filled {
+    color: #ffb300;
+}
+
+.occupancy.level-3 i.filled {
+    color: #ff6b6b;
+}
+
+.line-badge {
+    background-color: var(--line-colour, #f37021);
+    color: var(--line-text, #fff);
+    padding: 1px 6px;
     border-radius: 3px;
     font-size: 12px;
     font-weight: bold;
-    margin-left: 10px;
+}
+
+/* Cancelled trains, trains you can't walk to in time, and when to leave */
+.train-item.cancelled .countdown {
+    background-color: rgba(220, 53, 69, 0.35);
+    color: #fff;
+}
+
+.train-item.cancelled .times {
+    color: rgba(255, 255, 255, 0.4);
+    text-decoration: line-through;
+}
+
+.train-item.missed {
+    opacity: 0.4;
+}
+
+.train-item.leave-now .countdown {
+    animation: sydney-trains-pulse 1.6s ease-out infinite;
+}
+
+.train-item.leave-now .leave {
+    color: #ffb300;
+}
+
+@keyframes sydney-trains-pulse {
+    0% {
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--line-colour) 80%, transparent);
+    }
+    100% {
+        box-shadow: 0 0 0 10px transparent;
+    }
+}
+
+.no-trains,
+.loading,
+.update-failed {
+    padding: 6px 0;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
 }
 
 .no-trains {
-    padding: 10px;
-    color: rgba(255, 255, 255, 0.5);
     font-style: italic;
 }
 
@@ -98,9 +283,4 @@
     background-color: rgba(220, 53, 69, 0.1);
     border-radius: 4px;
     border-left: 3px solid #dc3545;
-}
-
-.loading {
-    color: rgba(255, 255, 255, 0.6);
-    padding: 10px;
 }

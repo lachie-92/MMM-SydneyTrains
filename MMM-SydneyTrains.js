@@ -5,22 +5,49 @@ Module.register("MMM-SydneyTrains", {
         updateInterval: 60000, // 1 minute
         maxTrainsPerRoute: 6,
         animationSpeed: 1000,
-        routesFile: "routes.json" // External routes configuration
+        routesFile: "routes.json", // External routes configuration
+        showOccupancy: true,
+        showAlerts: true,
+        timeFormat: config.timeFormat
+    },
+
+    // Line colours for the countdown tiles. Other lines use Sydney Trains orange.
+    lineColours: {
+        T1: "#f99d1c",
+        T2: "#0098cd",
+        T3: "#f37021",
+        T4: "#005aa3",
+        T5: "#c4258f",
+        T7: "#6f818e",
+        T8: "#00954c",
+        T9: "#d11f2f",
+        M1: "#168388"
+    },
+
+    // How full the train is, shown as one to three people
+    occupancyLevels: {
+        EMPTY: 1,
+        MANY_SEATS: 1,
+        FEW_SEATS: 2,
+        STANDING_ONLY: 3,
+        CRUSHED_STANDING: 3,
+        FULL: 3
     },
 
     start: function() {
         Log.info("Starting module: " + this.name);
         this.trains = {};
+        this.routeErrors = {};
         this.routes = [];
-        this.loaded = false;
+        this.routesLoaded = false;
         this.error = null;
-        
+
         this.loadRoutes();
         this.scheduleUpdate();
     },
 
     getStyles: function() {
-        return ["MMM-SydneyTrains.css"];
+        return ["font-awesome.css", "MMM-SydneyTrains.css"];
     },
 
     loadRoutes: function() {
@@ -36,7 +63,13 @@ Module.register("MMM-SydneyTrains", {
         setInterval(function() {
             self.loadRoutes();
         }, this.config.updateInterval);
-        
+
+        // Redraw between updates so the countdowns stay current.
+        // MagicMirror skips the redraw when nothing has changed.
+        setInterval(function() {
+            self.updateDom();
+        }, 15000);
+
         // Initial update
         this.updateTrains();
     },
@@ -55,8 +88,8 @@ Module.register("MMM-SydneyTrains", {
         this.routes.forEach(route => {
             this.sendSocketNotification("GET_TRAINS", {
                 apiKey: this.config.apiKey,
-                stopId: route.stopId,
-                routeId: route.id
+                route: route,
+                count: this.config.maxTrainsPerRoute
             });
         });
     },
@@ -64,41 +97,39 @@ Module.register("MMM-SydneyTrains", {
     socketNotificationReceived: function(notification, payload) {
         if (notification === "ROUTES_LOADED") {
             this.routes = payload;
+            this.routesLoaded = true;
+            this.error = null;
             Log.info("Loaded " + this.routes.length + " routes");
             this.updateTrains();
         } else if (notification === "ROUTES_ERROR") {
             this.error = "Error loading routes: " + payload;
             this.updateDom(this.config.animationSpeed);
         } else if (notification === "TRAINS_DATA") {
-            this.trains[payload.routeId] = payload.data;
-            this.loaded = true;
-            this.error = null;
+            this.trains[payload.routeId] = payload;
+            this.routeErrors[payload.routeId] = null;
             this.updateDom(this.config.animationSpeed);
         } else if (notification === "TRAINS_ERROR") {
-            this.error = payload.error;
+            // Keep showing the last trains, with a note that the update failed
+            this.routeErrors[payload.routeId] = payload.error;
             this.updateDom(this.config.animationSpeed);
         }
     },
 
     getDom: function() {
-        var wrapper = document.createElement("div");
-        wrapper.className = "sydney-trains";
+        var wrapper = this.createElement("div", "sydney-trains");
 
         if (this.error) {
-            wrapper.innerHTML = '<div class="error">' + this.error + '</div>';
+            wrapper.appendChild(this.createElement("div", "error", this.error));
             return wrapper;
         }
 
-        if (!this.loaded) {
-            wrapper.innerHTML = '<div class="loading">Loading trains...</div>';
+        if (!this.routesLoaded) {
+            wrapper.appendChild(this.createElement("div", "loading", "Loading trains..."));
             return wrapper;
         }
 
         this.routes.forEach(route => {
-            var routeDiv = this.createRouteDisplay(route);
-            if (routeDiv) {
-                wrapper.appendChild(routeDiv);
-            }
+            wrapper.appendChild(this.createRouteDisplay(route));
         });
 
         return wrapper;
@@ -106,145 +137,239 @@ Module.register("MMM-SydneyTrains", {
 
     createRouteDisplay: function(route) {
         var routeData = this.trains[route.id];
-        if (!routeData || !routeData.stopEvents) {
-            return null;
-        }
+        var routeError = this.routeErrors[route.id];
 
-        var routeContainer = document.createElement("div");
-        routeContainer.className = "route-container";
+        var routeContainer = this.createElement("div", "route-container");
 
         // Route header
-        var header = document.createElement("div");
-        header.className = "route-header";
-        header.innerHTML = '<i class="fas fa-train"></i> ' + route.name;
+        var header = this.createElement("div", "route-header");
+        header.appendChild(this.createElement("i", "fa-solid fa-train"));
+        header.appendChild(document.createTextNode(route.name));
         routeContainer.appendChild(header);
 
-        // Filter and process trains
-        var trains = routeData.stopEvents
-            .filter(event => this.filterTrain(event, route))
-            .slice(0, this.config.maxTrainsPerRoute);
-
-        if (trains.length === 0) {
-            var noTrains = document.createElement("div");
-            noTrains.className = "no-trains";
-            noTrains.innerHTML = "No upcoming trains";
-            routeContainer.appendChild(noTrains);
+        if (!routeData) {
+            routeContainer.appendChild(this.createElement("div", routeError ? "error" : "loading", routeError || "Loading trains..."));
             return routeContainer;
         }
 
-        // Create train list
-        var trainList = document.createElement("div");
-        trainList.className = "train-list";
+        if (this.config.showAlerts) {
+            routeData.alerts.forEach(alert => {
+                var alertDiv = this.createElement("div", "route-alert");
+                alertDiv.appendChild(this.createElement("i", "fa-solid fa-triangle-exclamation"));
+                alertDiv.appendChild(document.createTextNode(alert));
+                routeContainer.appendChild(alertDiv);
+            });
+        }
 
+        // Trains drop off 30 seconds after they leave
+        var now = Date.now();
+        var trains = routeData.trains
+            .filter(train => this.departureTime(train) > now - 30000)
+            .slice(0, this.config.maxTrainsPerRoute);
+
+        if (trains.length === 0) {
+            routeContainer.appendChild(this.createElement("div", "no-trains", "No upcoming trains"));
+        } else {
+            // Pickup and drop-off stations, once above the times
+            var places = this.createElement("div", "places");
+            places.appendChild(this.createElement("span", "from", trains[0].from));
+            if (trains[0].arrivalPlanned) {
+                places.appendChild(this.createElement("span", "to", trains[0].to));
+            }
+            routeContainer.appendChild(places);
+        }
+
+        var trainList = this.createElement("div", "train-list");
         trains.forEach(train => {
-            var trainItem = this.createTrainItem(train);
-            trainList.appendChild(trainItem);
+            trainList.appendChild(this.createTrainItem(train, route, now));
         });
-
         routeContainer.appendChild(trainList);
+
+        if (routeError) {
+            routeContainer.appendChild(this.createElement("div", "update-failed", "Update failed: " + routeError));
+        }
+
         return routeContainer;
     },
 
-    filterTrain: function(event, route) {
-        // Filter by line if specified
-        if (route.lineFilter) {
-            var line = event.transportation?.number || '';
-            if (!line.toLowerCase().includes(route.lineFilter.toLowerCase())) {
-                return false;
-            }
+    createTrainItem: function(train, route, now) {
+        var departure = this.departureTime(train);
+        var minutesUntil = Math.round((departure - now) / 60000);
+        var leaveIn = route.walkMinutes != null ? minutesUntil - route.walkMinutes : null;
+        var colour = route.colour || this.lineColours[train.line] || "#f37021";
+
+        var item = this.createElement("div", "train-item");
+        item.style.setProperty("--line-colour", colour);
+        item.style.setProperty("--line-text", this.textColourFor(colour));
+        if (train.cancelled) {
+            item.classList.add("cancelled");
+        } else if (leaveIn != null && leaveIn < 0) {
+            item.classList.add("missed");
+        } else if (leaveIn === 0) {
+            item.classList.add("leave-now");
         }
 
-        // Filter by destination if specified
-        if (route.destinationFilter) {
-            var destination = event.transportation?.destination?.name || '';
-            if (!destination.toLowerCase().includes(route.destinationFilter.toLowerCase())) {
-                return false;
-            }
-        }
+        item.appendChild(this.createCountdown(minutesUntil, train.cancelled));
 
-        return true;
+        var body = this.createElement("div", "train-body");
+
+        // Departure and arrival times with the trip length between them,
+        // or where the train is going for routes without a toStopId
+        var times = this.createElement("div", "train-row times");
+        times.appendChild(this.createElement("span", "depart", this.formatTime(departure)));
+        if (train.arrivalPlanned) {
+            var arrival = new Date(train.arrivalEstimated || train.arrivalPlanned).getTime();
+            var journey = this.createElement("span", "journey");
+            journey.appendChild(this.createElement("span", "journey-length", Math.round((arrival - departure) / 60000) + " min"));
+            times.appendChild(journey);
+            times.appendChild(this.createElement("span", "arrive", this.formatTime(arrival)));
+        } else {
+            times.appendChild(this.createElement("span", "terminus", train.to));
+        }
+        body.appendChild(times);
+
+        // Status, how full it is and the line
+        var statusRow = this.createElement("div", "train-row status-row");
+        statusRow.appendChild(this.createStatus(train, leaveIn));
+
+        var extras = this.createElement("span", "extras");
+        var cars = this.carsText(train);
+        if (cars) {
+            extras.appendChild(this.createElement("span", "cars", cars));
+        }
+        var occupancy = this.occupancyLevels[train.occupancy];
+        if (this.config.showOccupancy && occupancy) {
+            extras.appendChild(this.createOccupancy(occupancy));
+        }
+        if (train.line) {
+            extras.appendChild(this.createElement("span", "line-badge", train.line));
+        }
+        statusRow.appendChild(extras);
+        body.appendChild(statusRow);
+
+        item.appendChild(body);
+        return item;
     },
 
-    createTrainItem: function(train) {
-        var item = document.createElement("div");
-        item.className = "train-item";
+    createCountdown: function(minutesUntil, cancelled) {
+        var countdown = this.createElement("div", "countdown");
+        var value;
+        var unit = null;
 
-        var destination = train.transportation?.destination?.name || 'Unknown';
-        // Short line name ("T4") and platform name ("Platform 1") rather than the full line name and platform code ("KRW1")
-        var lineNumber = train.transportation?.disassembledName || train.transportation?.number || '';
-        var platform = train.location?.properties?.platformName || 'Platform ' + (train.location?.properties?.platform || 'TBA');
-
-        // Calculate time and delay
-        var departureTimePlanned = train.departureTimePlanned;
-        var departureTimeEstimated = train.departureTimeEstimated;
-        var displayTime = departureTimeEstimated || departureTimePlanned;
-
-        var delayMinutes = 0;
-        var isDelayed = false;
-
-        if (departureTimePlanned && departureTimeEstimated) {
-            var planned = new Date(departureTimePlanned);
-            var estimated = new Date(departureTimeEstimated);
-            delayMinutes = Math.round((estimated - planned) / 60000);
-            isDelayed = delayMinutes > 0;
-        }
-
-        if (isDelayed) {
-            item.classList.add("delayed");
-        }
-
-        // Time display
-        var timeDiv = document.createElement("div");
-        timeDiv.className = "train-time";
-        
-        var departureDate = new Date(displayTime);
-        var now = new Date();
-        var minutesUntil = Math.round((departureDate - now) / 60000);
-        
-        if (minutesUntil < 1) {
-            timeDiv.innerHTML = "Now";
-        } else if (minutesUntil < 60) {
-            timeDiv.innerHTML = minutesUntil + " min";
+        if (cancelled) {
+            value = "–";
+        } else if (minutesUntil < 1) {
+            value = "Now";
+        } else if (minutesUntil < 100) {
+            value = minutesUntil;
+            unit = minutesUntil === 1 ? "min" : "mins";
         } else {
-            timeDiv.innerHTML = departureDate.toLocaleTimeString('en-AU', { 
-                hour: '2-digit', 
-                minute: '2-digit' 
-            });
-        }
-        
-        item.appendChild(timeDiv);
-
-        // Destination info
-        var infoDiv = document.createElement("div");
-        infoDiv.className = "train-info";
-        
-        var destSpan = document.createElement("span");
-        destSpan.className = "destination";
-        destSpan.innerHTML = destination;
-        infoDiv.appendChild(destSpan);
-
-        if (lineNumber) {
-            var lineSpan = document.createElement("span");
-            lineSpan.className = "line-badge";
-            lineSpan.innerHTML = lineNumber;
-            infoDiv.appendChild(lineSpan);
+            value = Math.floor(minutesUntil / 60);
+            unit = value === 1 ? "hr" : "hrs";
         }
 
-        var platformSpan = document.createElement("span");
-        platformSpan.className = "platform";
-        platformSpan.innerHTML = platform;
-        infoDiv.appendChild(platformSpan);
+        countdown.appendChild(this.createElement("span", "countdown-value", value));
+        if (unit) {
+            countdown.appendChild(this.createElement("span", "countdown-unit", unit));
+        }
+        return countdown;
+    },
 
-        item.appendChild(infoDiv);
+    createStatus: function(train, leaveIn) {
+        var delay = train.realtime ? this.delayMinutes(train) : 0;
+        var state;
+        var text;
 
-        // Delay indicator
-        if (isDelayed) {
-            var delayDiv = document.createElement("div");
-            delayDiv.className = "delay-badge";
-            delayDiv.innerHTML = "+" + delayMinutes + " min";
-            item.appendChild(delayDiv);
+        if (train.cancelled) {
+            state = "cancelled";
+            text = "Cancelled";
+        } else if (!train.realtime) {
+            state = "scheduled";
+            text = "Scheduled";
+        } else if (delay > 0) {
+            state = delay >= 5 ? "late" : "slightly-late";
+            text = delay + " min late";
+        } else if (delay < 0) {
+            state = "early";
+            text = -delay + " min early";
+        } else {
+            state = "on-time";
+            text = "On time";
         }
 
-        return item;
+        var status = this.createElement("span", "status");
+        status.appendChild(this.createElement("span", "status-light " + state));
+        status.appendChild(document.createTextNode(text));
+
+        if (train.fromPlatform) {
+            status.appendChild(this.createElement("span", "platform", train.fromPlatform));
+        }
+
+        // With walkMinutes set, when to head out the door
+        if (leaveIn != null && !train.cancelled) {
+            var leave = leaveIn < 0 ? "Too late" : leaveIn === 0 ? "Leave now" : "Leave in " + leaveIn + " min";
+            status.appendChild(this.createElement("span", "leave", leave));
+        }
+
+        return status;
+    },
+
+    createOccupancy: function(level) {
+        var occupancy = this.createElement("span", "occupancy level-" + level);
+        for (var i = 1; i <= 3; i++) {
+            occupancy.appendChild(this.createElement("i", "fa-solid fa-person" + (i <= level ? " filled" : "")));
+        }
+        return occupancy;
+    },
+
+    // Where to stand at short platforms, or a warning about a short train
+    carsText: function(train) {
+        if (train.cars && train.carsFrom && train.carsTo && train.carsTo - train.carsFrom + 1 < train.cars) {
+            return "Use cars " + train.carsFrom + "–" + train.carsTo;
+        }
+        if (train.cars && train.cars < 8) {
+            return train.cars + " cars";
+        }
+        return null;
+    },
+
+    departureTime: function(train) {
+        return new Date(train.departureEstimated || train.departurePlanned).getTime();
+    },
+
+    delayMinutes: function(train) {
+        if (!train.departurePlanned || !train.departureEstimated) {
+            return 0;
+        }
+        return Math.round((new Date(train.departureEstimated) - new Date(train.departurePlanned)) / 60000);
+    },
+
+    // Black or white text, whichever is easier to read on the line colour
+    textColourFor: function(colour) {
+        if (!/^#[0-9a-f]{6}$/i.test(colour)) {
+            return "#fff";
+        }
+        var rgb = colour.slice(1).match(/../g).map(part => parseInt(part, 16) / 255);
+        var luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+        return luminance > 0.55 ? "#000" : "#fff";
+    },
+
+    formatTime: function(time) {
+        return new Date(time).toLocaleTimeString("en-AU", {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: this.config.timeFormat !== 24
+        });
+    },
+
+    createElement: function(tag, className, text) {
+        var element = document.createElement(tag);
+        if (className) {
+            element.className = className;
+        }
+        if (text != null) {
+            element.textContent = text;
+        }
+        return element;
     }
 });
