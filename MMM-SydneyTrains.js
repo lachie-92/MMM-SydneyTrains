@@ -8,6 +8,7 @@ Module.register("MMM-SydneyTrains", {
         routesFile: "routes.json", // External routes configuration
         showOccupancy: true,
         showAlerts: true,
+        showTrackwork: true, // weekend trackwork on the routes' lines, from Thursday
         timeFormat: config.timeFormat
     },
 
@@ -40,6 +41,7 @@ Module.register("MMM-SydneyTrains", {
         this.routeErrors = {};
         this.routes = [];
         this.routesLoaded = false;
+        this.trackwork = null;
         this.error = null;
 
         this.loadRoutes();
@@ -54,6 +56,13 @@ Module.register("MMM-SydneyTrains", {
         this.sendSocketNotification("LOAD_ROUTES", {
             routesFile: this.config.routesFile
         });
+    },
+
+    // MMM-MirrorRemote saved routes.json, so load it now rather than at the next update
+    notificationReceived: function(notification, payload) {
+        if (notification === "MIRROR_SETTINGS_CHANGED" && payload.section === "routes") {
+            this.loadRoutes();
+        }
     },
 
     scheduleUpdate: function() {
@@ -92,6 +101,30 @@ Module.register("MMM-SydneyTrains", {
                 count: this.config.maxTrainsPerRoute
             });
         });
+
+        // The helper caches trackwork, so asking every update is cheap
+        if (this.config.showTrackwork) {
+            this.sendSocketNotification("GET_TRACKWORK", {
+                apiKey: this.config.apiKey,
+                lines: this.selectedLines()
+            });
+        }
+    },
+
+    // Lines on the routes: each route's lineFilter, and the lines of its trains
+    selectedLines: function() {
+        var lines = [];
+        this.routes.forEach(route => {
+            if (route.lineFilter) {
+                lines.push(route.lineFilter.toUpperCase());
+            }
+            ((this.trains[route.id] || {}).trains || []).forEach(train => {
+                if (train.line) {
+                    lines.push(train.line);
+                }
+            });
+        });
+        return lines.filter((line, index) => lines.indexOf(line) === index);
     },
 
     socketNotificationReceived: function(notification, payload) {
@@ -112,6 +145,12 @@ Module.register("MMM-SydneyTrains", {
             // Keep showing the last trains, with a note that the update failed
             this.routeErrors[payload.routeId] = payload.error;
             this.updateDom(this.config.animationSpeed);
+        } else if (notification === "TRACKWORK_DATA") {
+            this.trackwork = payload;
+            this.updateDom(this.config.animationSpeed);
+        } else if (notification === "TRACKWORK_ERROR") {
+            // Keep the last notice. The helper logs the error.
+            Log.warn("MMM-SydneyTrains: couldn't load trackwork: " + payload.error);
         }
     },
 
@@ -128,11 +167,81 @@ Module.register("MMM-SydneyTrains", {
             return wrapper;
         }
 
+        if (this.config.showTrackwork && this.trackwork && this.trackwork.weekend) {
+            wrapper.appendChild(this.createTrackwork());
+        }
+
         this.routes.forEach(route => {
             wrapper.appendChild(this.createRouteDisplay(route));
         });
 
         return wrapper;
+    },
+
+    // One block per line: its trackwork this weekend, or that there's none
+    createTrackwork: function() {
+        var container = this.createElement("div", "trackwork");
+        var now = Date.now();
+
+        this.trackwork.lines.forEach(line => {
+            var notices = this.trackwork.notices.filter(notice =>
+                notice.line === line && notice.windows.some(window => new Date(window.to).getTime() > now));
+            var colour = this.lineColours[line] || "#f37021";
+
+            var createRow = (className, icon) => {
+                var row = this.createElement("div", "trackwork-notice " + className);
+                row.style.setProperty("--line-colour", colour);
+                row.style.setProperty("--line-text", this.textColourFor(colour));
+                row.appendChild(this.createElement("i", "fa-solid " + icon));
+                row.appendChild(this.createElement("span", "line-badge", line));
+                container.appendChild(row);
+                return row;
+            };
+
+            if (notices.length === 0) {
+                createRow("clear", "fa-circle-check").appendChild(this.createElement("span", "trackwork-text", "No trackwork this weekend"));
+            }
+
+            // One line per notice, e.g. "[T4] All weekend Trains run to a changed timetable"
+            notices.forEach(notice => {
+                var row = createRow(notice.buses ? "buses" : "", notice.buses ? "fa-bus" : "fa-person-digging");
+                var text = this.createElement("span", "trackwork-text");
+                text.appendChild(this.createElement("span", "trackwork-when", this.trackworkWhen(notice, now)));
+                text.appendChild(document.createTextNode(notice.title));
+                row.appendChild(text);
+            });
+        });
+
+        return container;
+    },
+
+    // "All weekend", or when it happens, e.g. "Fri 10:40 pm – Sat 2 am"
+    trackworkWhen: function(notice, now) {
+        if (notice.allWeekend) {
+            return "All weekend";
+        }
+        return notice.windows
+            .filter(window => new Date(window.to).getTime() > now)
+            .map(window => {
+                var from = new Date(window.from);
+                var to = new Date(window.to);
+                var start = this.formatDay(from) + " " + this.formatShortTime(from);
+                if (from.toDateString() === to.toDateString()) {
+                    return start + "–" + this.formatShortTime(to);
+                }
+                return start + " – " + this.formatDay(to) + " " + this.formatShortTime(to);
+            })
+            .join(", ");
+    },
+
+    formatDay: function(date) {
+        return date.toLocaleDateString("en-AU", { weekday: "short" });
+    },
+
+    // "2 am" rather than "2:00 am" in 12-hour time
+    formatShortTime: function(date) {
+        var time = this.formatTime(date);
+        return this.config.timeFormat === 24 ? time : time.replace(":00", "");
     },
 
     createRouteDisplay: function(route) {
@@ -141,10 +250,12 @@ Module.register("MMM-SydneyTrains", {
 
         var routeContainer = this.createElement("div", "route-container");
 
-        // Route header
+        // Route header, with the pickup and drop-off stations on the right
         var header = this.createElement("div", "route-header");
-        header.appendChild(this.createElement("i", "fa-solid fa-train"));
-        header.appendChild(document.createTextNode(route.name));
+        var routeName = this.createElement("span", "route-name");
+        routeName.appendChild(this.createElement("i", "fa-solid fa-train"));
+        routeName.appendChild(document.createTextNode(route.name));
+        header.appendChild(routeName);
         routeContainer.appendChild(header);
 
         if (!routeData) {
@@ -170,13 +281,8 @@ Module.register("MMM-SydneyTrains", {
         if (trains.length === 0) {
             routeContainer.appendChild(this.createElement("div", "no-trains", "No upcoming trains"));
         } else {
-            // Pickup and drop-off stations, once above the times
-            var places = this.createElement("div", "places");
-            places.appendChild(this.createElement("span", "from", trains[0].from));
-            if (trains[0].arrivalPlanned) {
-                places.appendChild(this.createElement("span", "to", trains[0].to));
-            }
-            routeContainer.appendChild(places);
+            var places = trains[0].arrivalPlanned ? trains[0].from + " → " + trains[0].to : trains[0].from;
+            header.appendChild(this.createElement("span", "places", places));
         }
 
         var trainList = this.createElement("div", "train-list");

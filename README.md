@@ -12,16 +12,17 @@ A [MagicMirror²](https://magicmirror.builders/) module that shows real-time Syd
 - Real-time status: on time, minutes late or early, cancelled, or scheduled when there's no real-time data
 - How full the train is, and a warning for short trains
 - **Leave-by times**: add your walk to the station and each train says when to leave, so trains you can't make are dimmed
-- Important alerts for the route, such as trackwork
+- **Weekend trackwork**: from Thursday, planned trackwork on your routes' lines this weekend, such as "Buses replace trains between Sutherland and Cronulla", or a tick when there's none
+- Important alerts for the route, such as major delays
 - Filter each route by line (e.g. `T1`) and destination
 - Routes live in a separate `routes.json` file, picked up on the next refresh without restarting the mirror
 
 ## Requirements
 
-This module uses the [Transport for NSW Open Data Hub](https://opendata.transport.nsw.gov.au/) **Trip Planner APIs** (trip and departure monitor endpoints).
+This module uses the [Transport for NSW Open Data Hub](https://opendata.transport.nsw.gov.au/) **Trip Planner APIs** (trip, departure monitor and service alert endpoints).
 
 - You need a free API key: register on the Open Data Hub, create an application, and add the **Trip Planner APIs** to it.
-- The free plan has request quotas; check the current limits on the portal. With the default settings the module makes one request per route every 60 seconds (about 1,440 requests per route per day).
+- The free plan has request quotas; check the current limits on the portal. With the default settings the module makes one request per route every 60 seconds (about 1,440 requests per route per day). From Thursday to Sunday it also checks for trackwork every 30 minutes (two requests each time).
 
 The module uses the built-in `fetch` in Node.js, so it has no npm dependencies.
 
@@ -59,6 +60,7 @@ Add this to the `modules` array in `~/MagicMirror/config/config.js`:
 | `routesFile` | `"routes.json"` | Routes file name, relative to the module folder. |
 | `showOccupancy` | `true` | Show how full each train is. |
 | `showAlerts` | `true` | Show important alerts under the route heading. |
+| `showTrackwork` | `true` | From Thursday to Sunday, show planned trackwork this weekend on your routes' lines (see [Weekend trackwork](#weekend-trackwork)). |
 | `timeFormat` | Your MagicMirror² setting | `12` or `24` hour times. |
 
 ## Routes
@@ -122,8 +124,22 @@ Some common stop IDs:
 - Penrith: `10101252`
 - Redfern: `10101421`
 
+## Weekend trackwork
+
+From Thursday until the end of Sunday, the module shows Sydney Trains and Metro trackwork planned for this weekend (Friday 6 pm to Monday 4 am) on your routes' lines. Those are each route's `lineFilter`, plus the lines of the trains it shows.
+
+Each notice is one line, with when it happens and what changes:
+
+```
+T4  All weekend  Trains run to a changed timetable and stopping pattern
+T4  Sat 6:30 am–4 pm  Buses replace trains between Sutherland and Cronulla
+```
+
+Buses replacing trains are shown in red. Lines with no trackwork get "No trackwork this weekend" with a tick, and finished trackwork drops off. Notices cover the whole line, so some may not affect the stations you use.
+
 ## Reading the display
 
+- **Route heading**: the route's name, with the pickup and drop-off stations on the right.
 - **Countdown tile**: minutes until the train leaves, in the line's colour. It pulses when it's time to leave.
 - **Times**: when the train leaves and when it arrives at `toStopId`, with the trip length between them. Real-time estimates are used when there are any.
 - **Status**: a green square for on time, amber or red for minutes late, blue for early, and an empty square for "Scheduled" when the train has no real-time data. Cancelled trains are crossed out.

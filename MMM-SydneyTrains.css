@@ -6,7 +6,7 @@
 }
 
 .route-container {
-    margin-bottom: 18px;
+    margin-bottom: 14px;
 }
 
 .route-container:last-child {
@@ -14,12 +14,32 @@
 }
 
 .route-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
     font-size: 17px;
     font-weight: bold;
     margin-bottom: 4px;
     padding-bottom: 4px;
     border-bottom: 2px solid #f37021;
     color: #f37021;
+}
+
+.route-name {
+    white-space: nowrap;
+}
+
+/* Pickup and drop-off stations */
+.places {
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    font-weight: normal;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    white-space: nowrap;
+    text-overflow: ellipsis;
 }
 
 .route-header i {
@@ -39,24 +59,65 @@
     margin-right: 6px;
 }
 
-/* Pickup and drop-off stations, lined up over the times */
-.places {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-    margin-left: 84px;
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 12px;
-    letter-spacing: 1px;
-    text-transform: uppercase;
+/* Weekend trackwork, shown from Thursday. One line per notice. */
+.trackwork {
+    margin-bottom: 8px;
 }
+
+.trackwork-notice {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
+}
+
+.trackwork-notice i {
+    flex-shrink: 0;
+    width: 15px;
+    color: #ffb300;
+    text-align: center;
+}
+
+.trackwork-notice .line-badge {
+    flex-shrink: 0;
+}
+
+.trackwork-notice.clear {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.trackwork-notice.clear i {
+    color: #3fb950;
+}
+
+.trackwork-text {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.trackwork-when {
+    margin-right: 6px;
+    color: #fff;
+    font-weight: bold;
+}
+
+/* Buses replacing trains is the one to notice */
+.trackwork-notice.buses i,
+.trackwork-notice.buses .trackwork-when {
+    color: #ff6b6b;
+}
+
 
 /* One row per train: countdown tile, then times and status */
 .train-item {
     display: flex;
     align-items: stretch;
     gap: 12px;
-    padding: 3px 0;
+    padding: 2px 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
@@ -99,8 +160,6 @@
     gap: 10px;
 }
 
-.places .from,
-.places .to,
 .terminus {
     overflow: hidden;
     white-space: nowrap;

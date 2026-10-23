@@ -7,6 +7,8 @@ const TRAIN_CLASSES = [1, 2]; // Trains and Sydney Metro
 const WALK_CLASSES = [99, 100]; // Walking between platforms
 const ALERT_PRIORITIES = ["high", "veryHigh"]; // Skips routine notices like station updates
 const MAX_ALERTS = 2;
+const TRACKWORK_REFRESH = 30 * 60 * 1000; // The trackwork feed is large and rarely changes
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 module.exports = NodeHelper.create({
     start: function() {
@@ -18,6 +20,8 @@ module.exports = NodeHelper.create({
             this.loadRoutes(payload.routesFile);
         } else if (notification === "GET_TRAINS") {
             this.getTrains(payload);
+        } else if (notification === "GET_TRACKWORK") {
+            this.getTrackwork(payload);
         }
     },
 
@@ -143,6 +147,65 @@ module.exports = NodeHelper.create({
         };
     },
 
+    // Planned trackwork on the given lines this weekend. Nothing is sent
+    // Monday to Wednesday, as the notice only shows from Thursday.
+    getTrackwork: async function(payload) {
+        const { apiKey, lines } = payload;
+        const weekend = upcomingWeekend();
+
+        if (!weekend) {
+            this.sendSocketNotification("TRACKWORK_DATA", { weekend: false, lines: lines, notices: [] });
+            return;
+        }
+
+        try {
+            if (!this.trackwork || Date.now() - this.trackwork.time > TRACKWORK_REFRESH) {
+                // Trains (1) and Sydney Metro (2) are separate requests
+                const feeds = await Promise.all(["1", "2"].map(type => this.request(apiKey, "add_info", {
+                    filterMOTType: type,
+                    filterInfoType: "lineInfo",
+                    filterPublicationStatus: "current"
+                })));
+                this.trackwork = {
+                    time: Date.now(),
+                    infos: feeds
+                        .flatMap(data => data.infos?.current || [])
+                        .filter(info => info.properties?.announcementType === "trackwork")
+                };
+            }
+
+            const notices = [];
+            this.trackwork.infos.forEach(info => {
+                const windows = (info.timestamps?.validity || []).filter(window => overlaps(window, weekend.start, weekend.end));
+                if (windows.length === 0) {
+                    return;
+                }
+
+                const infoLines = (info.affected?.lines || []).map(lineName);
+                lines.filter(line => infoLines.includes(line)).forEach(line => {
+                    notices.push({
+                        line: line,
+                        title: headline(info.subtitle || info.urlText || ''),
+                        buses: /buses replace/i.test(info.subtitle || ''),
+                        allWeekend: windows.some(window => covers(window, weekend.saturday, weekend.sundayEnd)),
+                        windows: windows.map(window => ({ from: window.from, to: window.to }))
+                    });
+                });
+            });
+
+            // The same notice can be listed once per direction
+            const unique = notices.filter((notice, index) => notices.findIndex(other =>
+                other.line === notice.line && other.title === notice.title && JSON.stringify(other.windows) === JSON.stringify(notice.windows)) === index);
+            unique.sort((a, b) => new Date(a.windows[0].from) - new Date(b.windows[0].from));
+
+            this.sendSocketNotification("TRACKWORK_DATA", { weekend: true, lines: lines, notices: unique });
+
+        } catch (error) {
+            console.error("Error fetching trackwork:", error);
+            this.sendSocketNotification("TRACKWORK_ERROR", { error: error.message });
+        }
+    },
+
     request: async function(apiKey, endpoint, params) {
         const query = new URLSearchParams(Object.assign({
             outputFormat: "rapidJSON",
@@ -235,19 +298,76 @@ function collectAlerts(services) {
     return alerts.slice(0, MAX_ALERTS);
 }
 
-// The trip planner wants Sydney's date and time, whatever the mirror's time zone
-function sydneyTime() {
+// "Trains run to a changed timetable. You may need to change trains" -> "Trains run to a changed timetable"
+function headline(text) {
+    return text
+        .split('. ')[0]
+        .replace(/\.$/, '')
+        .replace(/&amp;/g, '&')
+        .replace(/&#39;|&rsquo;/g, "'")
+        .trim();
+}
+
+// Sydney's date and time, whatever the mirror's time zone
+function sydneyParts(date) {
     const parts = {};
     new Intl.DateTimeFormat("en-AU", {
         timeZone: "Australia/Sydney",
+        weekday: "short",
         year: "numeric",
         month: "2-digit",
         day: "2-digit",
         hour: "2-digit",
         minute: "2-digit",
         hourCycle: "h23"
-    }).formatToParts(new Date()).forEach(part => {
+    }).formatToParts(date).forEach(part => {
         parts[part.type] = part.value;
     });
+    return parts;
+}
+
+// The trip planner wants Sydney's date and time
+function sydneyTime() {
+    const parts = sydneyParts(new Date());
     return { date: parts.year + parts.month + parts.day, time: parts.hour + parts.minute };
+}
+
+// Sydney wall-clock time as a number like 202610241430, so times can be
+// compared without converting time zones
+function sydneyStamp(time) {
+    const parts = sydneyParts(new Date(time));
+    return Number(parts.year + parts.month + parts.day + parts.hour + parts.minute);
+}
+
+// A date (as a UTC day) and time of day as the same kind of number
+function dayStamp(day, hour) {
+    const date = new Date(day);
+    const pad = number => String(number).padStart(2, '0');
+    return Number(date.getUTCFullYear() + pad(date.getUTCMonth() + 1) + pad(date.getUTCDate()) + pad(hour) + '00');
+}
+
+// This weekend, from Friday 6 pm to Monday 4 am in Sydney. Null Monday to
+// Wednesday, as the notice only shows from Thursday.
+function upcomingWeekend() {
+    const now = sydneyParts(new Date());
+    const daysToSaturday = { Thu: 2, Fri: 1, Sat: 0, Sun: -1 }[now.weekday];
+    if (daysToSaturday === undefined) {
+        return null;
+    }
+
+    const saturday = Date.UTC(Number(now.year), Number(now.month) - 1, Number(now.day) + daysToSaturday);
+    return {
+        start: dayStamp(saturday - DAY_MS, 18),
+        saturday: dayStamp(saturday, 4),
+        sundayEnd: dayStamp(saturday + 2 * DAY_MS, 0),
+        end: dayStamp(saturday + 2 * DAY_MS, 4)
+    };
+}
+
+function overlaps(window, start, end) {
+    return sydneyStamp(window.from) < end && sydneyStamp(window.to) > start;
+}
+
+function covers(window, start, end) {
+    return sydneyStamp(window.from) <= start && sydneyStamp(window.to) >= end;
 }
